@@ -7,9 +7,9 @@ import cv2.aruco as aruco
 import numpy as np
 import yaml
 
-from Camera import compute_projected_center, project_mask
-from Navigation import (is_convex_quad, order_points_clockwise,
-                        compute_velocity, astar,
+from Camera import (is_convex_quad, order_points_clockwise,
+                    compute_projected_center, project_mask)
+from Navigation import (compute_velocity, astar,
                         get_lookahead_point, find_nearest_free,
                         dijkstra, greedy_best_first,
                         bidirectional_astar, compute_metrics)
@@ -49,6 +49,8 @@ robot_status: bool = config['socket_params']['enable']
 
 H: float = config['camera']['H']
 h: float = config['camera']['h']
+offset_x: float = config['camera']['offset_x']
+offset_y: float = config['camera']['offset_y']
 wall_width: int = config['camera']['wall_width']
 extra_offset_px: int = config['camera']['add_zone']
 scale: float = config['camera']['scale_factor']
@@ -56,7 +58,9 @@ scale_algorithm: float = config['camera']['scale_factor_mask']
 calibration_display_scale: float = config['camera']['calibration_display_scale']
 working_display_scale: int = config['camera']['working_display_scale']
 sharpening: bool = config['camera']['sharpening']
-camera_status: float = config['camera']['online']
+camera_status: bool = config['camera']['online']
+parallax: bool = config['camera']['parallax']
+video_stream: int = config['camera']['video_stream']
 
 resolution: int = config['map_params']['resolution']
 algorithm: str = config['map_params']['algorithm']
@@ -103,6 +107,7 @@ def mouse_callback(
     global mode, calib_points, perspective_matrix, trans_center
     global click_point, motion_started, start_time_task, trajectory
     global output_size, start_point, last_completed_path
+    global offset_x, offset_y
 
     if mode == 'calibrate':
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -138,7 +143,8 @@ def mouse_callback(
                             perspective_matrix=perspective_matrix,
                             frame_shape=frame_shape
                         )
-                        trans_center = (orig_center_in_area[1], orig_center_in_area[0])
+                        trans_center = (orig_center_in_area[1] + offset_x, orig_center_in_area[0] + offset_y)
+                        print(orig_center_in_area[1], orig_center_in_area[0])
                     else:
                         trans_center = (output_size[0] // 2, output_size[1] // 2)
 
@@ -170,7 +176,7 @@ def main():
     # Создание глобальных переменных
     global mode, calib_points, trans_center, center_y, center_x, dx, dy, angle, sharpening_kernel
     global output_size, click_point, motion_started, start_time_task, trajectory, start_point
-    global frame_shape, global_path, last_click_point, last_completed_path
+    global frame_shape, global_path, last_click_point, last_completed_path, video_stream
 
     # Подключение к Robotino
     sock = None
@@ -195,7 +201,7 @@ def main():
 
     # Подключение к камере или к видео
     if camera_status:
-        cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(video_stream)
     else:
         # "video_photo_space\vid.mp4"
         # "video_photo_space\WIN_20260508_21_24_57_Pro.mp4"
@@ -270,10 +276,11 @@ def main():
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_denoise)
 
             # Проекция маски (для учёта высоты камеры)
-            mask = project_mask(mask,
-                                H=H,
-                                h=h,
-                                center=trans_center)
+            if parallax:
+                mask = project_mask(mask,
+                                    H=H,
+                                    h=h,
+                                    center=trans_center)
 
             raw_obstacle_mask = mask.copy()
 

@@ -5,48 +5,6 @@ import heapq
 from typing import List, Dict, Optional, Tuple
 
 
-def is_convex_quad(pts: np.ndarray) -> bool:
-    """
-    Проверяет, образуют ли 4 точки выпуклый четырёхугольник.
-
-    Входы:
-        - pts: np.ndarray — координаты четырёх точек.
-    Выходы:
-        - bool — True, если четырёхугольник выпуклый, иначе False.
-    """
-
-    pts = pts.reshape(4, 2)
-    signs = []
-    for i in range(4):
-        p0 = pts[i]
-        p1 = pts[(i + 1) % 4]
-        p2 = pts[(i + 2) % 4]
-        cross = (p1[0] - p0[0]) * (p2[1] - p1[1]) - (p1[1] - p0[1]) * (p2[0] - p1[0])
-        signs.append(np.sign(cross))
-    return all(s == signs[0] for s in signs if s != 0)
-
-
-def order_points_clockwise(pts: np.ndarray):
-    """
-    Упорядочивает 4 точки по часовой стрелке начиная с верхнего левого угла.
-
-    Входы:
-        - pts: np.ndarray — исходные точки.
-    Выходы:
-        - rect: np.ndarray — упорядоченные точки: [верх-лево, верх-право, низ-право, низ-лево].
-    """
-
-    pts = np.array(pts, dtype=np.float32).reshape(4, 2)
-    rect = np.zeros((4, 2), dtype=np.float32)
-    s = pts.sum(axis=1)
-    rect[0] = pts[np.argmin(s)]
-    rect[2] = pts[np.argmax(s)]
-    diff = np.diff(pts, axis=1).flatten()
-    rect[1] = pts[np.argmin(diff)]
-    rect[3] = pts[np.argmax(diff)]
-    return rect
-
-
 def compute_velocity(current_position,
                      target_position,
                      v_max, tolerance):
