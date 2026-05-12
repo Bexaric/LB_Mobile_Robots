@@ -1,3 +1,7 @@
+# Ручное добавление
+video_photo_space
+
+# Автоматическое добавление
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
