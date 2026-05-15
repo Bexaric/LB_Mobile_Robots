@@ -44,7 +44,15 @@ dx: float = 0.0                                      # разность X меж
 dy: float = 0.0                                      # разность Y между двумя углами маркера (пкс)
 angle: float = 0.0                                   # угол ориентации робота
 
-auto_trajectories: list = []   # список кортежей (название_алгоритма, список_точек_траектории)
+# Автоматический режим
+auto_mode_enable: bool = bool(config['auto_mode']['enable'])
+auto_start: np.ndarray = np.array([config['auto_mode']['start_x'], config['auto_mode']['start_y']], dtype=np.float32)
+auto_end: np.ndarray = np.array([config['auto_mode']['end_x'], config['auto_mode']['end_y']], dtype=np.float32)
+auto_algorithms = ["astar", "dijkstra", "greedy", "bdastar"]
+auto_phase: str = 'to_start'
+auto_algo_idx: int = 0
+auto_last_path: list = []
+auto_trajectories: list = []                         # список маршрутов для автоматического режима
 
 # Параметры с файла "parameters.yaml"
 robot_status: bool = config['socket_params']['enable']
@@ -72,15 +80,6 @@ acceptable_error: float = config['map_params']['acceptable_error']
 
 robot_radius: float = config['robot']['radius']
 v_max: float = config['robot']['max_speed']
-
-# Автоматический режим
-auto_mode_enable: bool = bool(config['auto_mode']['enable'])
-auto_start: np.ndarray = np.array([config['auto_mode']['start_x'], config['auto_mode']['start_y']], dtype=np.float32)
-auto_end: np.ndarray = np.array([config['auto_mode']['end_x'], config['auto_mode']['end_y']], dtype=np.float32)
-auto_algorithms = ["astar", "dijkstra", "greedy", "bdastar"]
-auto_phase: str = 'to_start'   # 'to_start', 'to_target', 'to_return', 'finished'
-auto_algo_idx: int = 0
-auto_last_path: list = []       # последний непустой глобальный путь для метрик
 
 
 def mouse_callback(
@@ -240,7 +239,6 @@ def main():
 
     try:
         while True:
-            start_time = time.time()
             ret, frame = cap.read()
             if not ret:
                 break
@@ -723,7 +721,6 @@ def main():
                             pt2 = (int(planned[i + 1][1]), int(planned[i + 1][0]))
                             cv2.arrowedLine(working_area, pt1, pt2,
                                             (128, 128, 128), 2, tipLength=0.1)
-
 
                     # Фактическая траектория
                     actual = last_completed_path['actual']
