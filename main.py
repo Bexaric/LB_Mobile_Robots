@@ -44,6 +44,8 @@ dx: float = 0.0                                      # разность X меж
 dy: float = 0.0                                      # разность Y между двумя углами маркера (пкс)
 angle: float = 0.0                                   # угол ориентации робота
 
+auto_trajectories: list = []   # список кортежей (название_алгоритма, список_точек_траектории)
+
 # Параметры с файла "parameters.yaml"
 robot_status: bool = config['socket_params']['enable']
 
@@ -70,6 +72,15 @@ acceptable_error: float = config['map_params']['acceptable_error']
 
 robot_radius: float = config['robot']['radius']
 v_max: float = config['robot']['max_speed']
+
+# Автоматический режим
+auto_mode_enable: bool = bool(config['auto_mode']['enable'])
+auto_start: np.ndarray = np.array([config['auto_mode']['start_x'], config['auto_mode']['start_y']], dtype=np.float32)
+auto_end: np.ndarray = np.array([config['auto_mode']['end_x'], config['auto_mode']['end_y']], dtype=np.float32)
+auto_algorithms = ["astar", "dijkstra", "greedy", "bdastar"]
+auto_phase: str = 'to_start'   # 'to_start', 'to_target', 'to_return', 'finished'
+auto_algo_idx: int = 0
+auto_last_path: list = []       # последний непустой глобальный путь для метрик
 
 
 def mouse_callback(
@@ -108,6 +119,9 @@ def mouse_callback(
     global click_point, motion_started, start_time_task, trajectory
     global output_size, start_point, last_completed_path
     global offset_x, offset_y
+
+    if auto_mode_enable and mode == 'working':
+        return
 
     if mode == 'calibrate':
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -175,7 +189,10 @@ def mouse_callback(
 def main():
     # Создание глобальных переменных
     global mode, calib_points, trans_center, center_y, center_x, dx, dy, angle, sharpening_kernel
+    global robot_position, auto_pause_until, auto_trajectories, auto_phase, auto_algo_idx, auto_last_path
     global output_size, click_point, motion_started, start_time_task, trajectory, start_point
+    global auto_mode_enable, auto_phase, auto_algo_idx, auto_last_path, algorithm, click_point
+    global motion_started, start_time_task, trajectory, start_point
     global frame_shape, global_path, last_click_point, last_completed_path, video_stream
 
     # Подключение к Robotino
@@ -382,6 +399,93 @@ def main():
                             (origin_global[0] - 16, origin_global[1] + axis_len_global + 52),
                             cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 8)
 
+                # Автоматический режим (ЛБ2)
+                if auto_mode_enable:
+                    if global_path:
+                        auto_last_path = global_path.copy()
+
+                    if auto_phase == 'to_start':
+                        click_point = np.array([auto_start[1], auto_start[0]])
+                        algorithm = "astar"
+
+                        if not motion_started:
+                            motion_started = True
+                            start_time_task = time.time()
+                            start_point = robot_position.copy()
+
+                        if np.linalg.norm(robot_position - auto_start[::-1]) < acceptable_error_px:
+                            auto_phase = 'to_target'
+                            auto_algo_idx = 0
+                            motion_started = False
+                            auto_pause_until = time.time() + 5.0
+                            click_point = np.array([auto_end[1], auto_end[0]])
+                            algorithm = auto_algorithms[auto_algo_idx]
+                            trajectory.clear()
+                            print(f"Начало тестирования: {algorithm}")
+
+                    elif auto_phase == 'to_target':
+                        if time.time() < auto_pause_until:
+                            motion_started = False
+                        else:
+                            if not motion_started:
+                                motion_started = True
+                                start_time_task = time.time()
+                                start_point = robot_position.copy()
+                        if np.linalg.norm(robot_position - auto_end[::-1]) < acceptable_error_px:
+                            if trajectory:
+                                path_for_metrics = auto_last_path if auto_last_path else global_path
+                                metrics = compute_metrics(start_time_task, trajectory.copy(), path_for_metrics.copy(),
+                                                          pixel_per_mm)
+                                print(f"Метрики движения ({algorithm}):")
+                                print(f"Время прохождения маршрута: {metrics['time_s']} с")
+                                print(f"Планируемый путь: {metrics['planned_length_mm']} мм")
+                                print(f"Пройденный путь: {metrics['actual_length_mm']} мм")
+                                print(f"MSE (мм²): {metrics['mse_mm2']}")
+                                if metrics['r_squared'] is not None:
+                                    print(f"R² (коэффициент детерминации): {metrics['r_squared']}")
+                                print(f"Количество точек пути: {metrics['num_points']}")
+
+                            auto_trajectories.append((algorithm, trajectory.copy()))
+                            auto_phase = 'to_return'
+                            motion_started = False
+                            auto_pause_until = time.time() + 2.0
+                            click_point = np.array([auto_start[1], auto_start[0]])
+                            algorithm = "astar"
+                            trajectory.clear()
+                            print("\nВозврат на старт (astar)\n")
+
+                    elif auto_phase == 'to_return':
+                        if time.time() < auto_pause_until:
+                            motion_started = False
+                        else:
+                            if not motion_started:
+                                motion_started = True
+                                start_time_task = time.time()
+                                start_point = robot_position.copy()
+
+                        if np.linalg.norm(robot_position - auto_start[::-1]) < acceptable_error_px:
+                            auto_algo_idx += 1
+                            if auto_algo_idx < len(auto_algorithms):
+                                auto_phase = 'to_target'
+                                motion_started = False
+                                auto_pause_until = time.time() + 2.0
+                                algorithm = auto_algorithms[auto_algo_idx]
+                                click_point = np.array([auto_end[1], auto_end[0]])
+                                trajectory.clear()
+                                print(f"Тестирование: {algorithm}")
+                            else:
+                                auto_phase = 'finished'
+                                motion_started = False
+                                click_point = None
+                                start_point = None
+                                global_path = []
+                                trajectory.clear()
+                                last_completed_path = None
+
+                    elif auto_phase == 'finished':
+                        motion_started = False
+                        click_point = None
+
             # Планирование маршрута с учётом препятствий
             if ids is not None and click_point is not None:
                 if dynamic_update or (last_click_point is None or
@@ -475,7 +579,7 @@ def main():
 
                 # Остановка при достижении цели
                 dist_to_goal = np.linalg.norm(robot_position - click_point)
-                if dist_to_goal < acceptable_error_px:
+                if dist_to_goal < acceptable_error_px and auto_mode_enable == 0:
                     motion_started = False
 
                     # Сохраняем завершённый маршрут для отображения
@@ -555,7 +659,7 @@ def main():
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
 
                 # Начальная точка маршрута
-                if start_point is not None:
+                if start_point is not None and auto_mode_enable == 0:
                     # чёрный круг старта (всегда, если был запомнен)
                     cv2.circle(working_area, (int(start_point[1]), int(start_point[0])), 10, (0, 0, 0), -1)
                     # подписи только если маршрут существует
@@ -619,6 +723,8 @@ def main():
                             pt2 = (int(planned[i + 1][1]), int(planned[i + 1][0]))
                             cv2.arrowedLine(working_area, pt1, pt2,
                                             (128, 128, 128), 2, tipLength=0.1)
+
+
                     # Фактическая траектория
                     actual = last_completed_path['actual']
                     if actual and len(actual) > 1:
@@ -626,6 +732,21 @@ def main():
                             pt1 = (int(actual[i - 1][1]), int(actual[i - 1][0]))
                             pt2 = (int(actual[i][1]), int(actual[i][0]))
                             cv2.line(working_area, pt1, pt2, (255, 38, 0), 3)
+
+                # Отрисовка траекторий автоматического тестирования
+                if auto_mode_enable and auto_phase == 'finished' and auto_trajectories:
+                    color_map = {
+                        "astar": (0, 0, 0),
+                        "dijkstra": (255, 0, 0),
+                        "greedy": (0, 140, 0),
+                        "bdastar": (255, 0, 255)
+                    }
+
+                    for algo_name, traj in auto_trajectories:
+                        if len(traj) > 1:
+                            pts = np.array([(int(p[1]), int(p[0])) for p in traj], dtype=np.int32)
+                            cv2.polylines(working_area, [pts], False,
+                                          color_map.get(algo_name, (128, 128, 128)), 6)
 
             # Отображение
             display = cv2.resize(working_area,
