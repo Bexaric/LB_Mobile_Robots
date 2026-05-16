@@ -132,7 +132,8 @@ def astar(
 def dijkstra(
         grid: np.ndarray,
         start: Tuple[int, int],
-        goal: Tuple[int, int]
+        goal: Tuple[int, int],
+        allow_diagonal: bool = True
 ) -> List[Tuple[int, int]]:
     """
     Алгоритм Дейкстры (частный случай A* без эвристики).
@@ -141,6 +142,7 @@ def dijkstra(
         - grid: np.ndarray — массив, где 0 — свободная ячейка, 1 — препятствие.
         - start: Tuple[int, int] — стартовая ячейка.
         - goal: Tuple[int, int] — целевая ячейка.
+        - allow_diagonal: bool — если True, используются 8 соседей (диагонали разрешены).
     Выходы:
         - List[Tuple[int, int]] — Список ячеек кратчайшего пути.
     """
@@ -153,7 +155,10 @@ def dijkstra(
     heapq.heappush(open_set, (0.0, start))
     came_from = {}
     g_score = {start: 0.0}
+
     directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if allow_diagonal:
+        directions += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
 
     while open_set:
         g, current = heapq.heappop(open_set)
@@ -166,7 +171,9 @@ def dijkstra(
                 continue
             if grid[nr, nc] != 0:
                 continue
-            tentative_g = g + 1.0
+
+            move_cost = math.hypot(dr, dc) if allow_diagonal else 1.0
+            tentative_g = g + move_cost
             neighbor = (nr, nc)
             if tentative_g < g_score.get(neighbor, float('inf')):
                 g_score[neighbor] = tentative_g
@@ -178,7 +185,8 @@ def dijkstra(
 def greedy_best_first(
         grid: np.ndarray,
         start: Tuple[int, int],
-        goal: Tuple[int, int]
+        goal: Tuple[int, int],
+        allow_diagonal: bool = True
 ) -> List[Tuple[int, int]]:
     """
     Жадный поиск по наилучшему соответствию (использует только эвристику).
@@ -188,7 +196,7 @@ def greedy_best_first(
         - grid: np.ndarray — массив, где 0 — свободная ячейка, 1 — препятствие.
         - start: Tuple[int, int] — стартовая ячейка.
         - goal: Tuple[int, int] — целевая ячейка.
-
+        - allow_diagonal: bool — если True, используются 8 соседей (диагонали разрешены).
     Выходы:
         - List[Tuple[int, int]] — Список ячеек пути.
     """
@@ -200,7 +208,10 @@ def greedy_best_first(
     heapq.heappush(open_set, (0.0, start))
     came_from = {}
     visited = set()
+
     directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if allow_diagonal:
+        directions += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
 
     while open_set:
         _, current = heapq.heappop(open_set)
@@ -262,7 +273,8 @@ def _merge_paths(
 def bidirectional_astar(
         grid: np.ndarray,
         start: Tuple[int, int],
-        goal: Tuple[int, int]
+        goal: Tuple[int, int],
+        allow_diagonal: bool = True
 ) -> List[Tuple[int, int]]:
     """
     Двунаправленный A* (одновременный поиск от старта и цели).
@@ -271,6 +283,7 @@ def bidirectional_astar(
         - grid: np.ndarray — массив, где 0 — свободная ячейка, 1 — препятствие.
         - start: Tuple[int, int] — стартовая ячейка.
         - goal: Tuple[int, int] — целевая ячейка.
+        - allow_diagonal: bool — если True, используются 8 соседей (диагонали разрешены).
     Выходы:
         - List[Tuple[int, int]] — Список ячеек оптимального пути.
     """
@@ -286,7 +299,10 @@ def bidirectional_astar(
     came_from_bwd = {}
     g_fwd = {start: 0.0}
     g_bwd = {goal: 0.0}
+
     directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    if allow_diagonal:
+        directions += [(-1, -1), (-1, 1), (1, -1), (1, 1)]
 
     while open_fwd and open_bwd:
         # Расширяем прямой поиск
@@ -299,7 +315,8 @@ def bidirectional_astar(
                 nr, nc = current_fwd[0] + dr, current_fwd[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W) or grid[nr, nc] != 0:
                     continue
-                tentative = g_fwd[current_fwd] + 1.0
+                move_cost = math.hypot(dr, dc) if allow_diagonal else 1.0
+                tentative = g_fwd[current_fwd] + move_cost
                 neighbor = (nr, nc)
                 if tentative < g_fwd.get(neighbor, float('inf')):
                     g_fwd[neighbor] = tentative
@@ -317,7 +334,8 @@ def bidirectional_astar(
                 nr, nc = current_bwd[0] + dr, current_bwd[1] + dc
                 if not (0 <= nr < H and 0 <= nc < W) or grid[nr, nc] != 0:
                     continue
-                tentative = g_bwd[current_bwd] + 1.0
+                move_cost = math.hypot(dr, dc) if allow_diagonal else 1.0
+                tentative = g_bwd[current_bwd] + move_cost
                 neighbor = (nr, nc)
                 if tentative < g_bwd.get(neighbor, float('inf')):
                     g_bwd[neighbor] = tentative

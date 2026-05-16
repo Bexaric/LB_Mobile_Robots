@@ -19,30 +19,30 @@ with open('parameters.yaml') as config_file:
     config = yaml.safe_load(config_file)
 print(config)
 
-output_size: Optional[Tuple[int, int]] = None        # размер рабочей области [ширина, высота] (пкс)
-start_time_task: float | None = None                 # время старта текущего маршрута (сек)
+output_size: Optional[Tuple[int, int]] = None         # размер рабочей области [ширина, высота] (пкс)
+start_time_task: float | None = None                  # время старта текущего маршрута (сек)
 
 # Состояние интерфейса
-mode: str = 'calibrate'                              # текущий режим интерфейса: 'calibrate' и 'working'
-calib_points: list = []                              # координаты четырёх углов рабочей области
-perspective_matrix: Optional[np.ndarray] = None      # матрица перспективного преобразования
-trans_center: Optional[Tuple[float, float]] = None   # проекция оптического центра камеры на рабочую область
-frame_shape: Optional[Tuple[int, int]] = None        # размеры исходного кадра [ширина, высота]
-sharpening_kernel: Optional[np.float32] = None       # ядро для повышения резкости
+mode: str = 'calibrate'                               # текущий режим интерфейса: 'calibrate' и 'working'
+calib_points: list = []                               # координаты четырёх углов рабочей области
+perspective_matrix: Optional[np.ndarray] = None       # матрица перспективного преобразования
+trans_center: Optional[Tuple[float, float]] = None    # проекция оптического центра камеры на рабочую область
+frame_shape: Optional[Tuple[int, int]] = None         # размеры исходного кадра [ширина, высота]
+sharpening_kernel: Optional[np.float32] = None        # ядро для повышения резкости
 
-motion_started: bool = False                         # флаг активности движения
-global_path: list = []                               # запланированный глобальный путь (список точек) (пкс)
-trajectory: list[np.ndarray] = []                    # фактическая траектория движения (список точек) (пкс)
-last_completed_path: Optional[dict] = None           # последний завершённый маршрут (список точек) (пкс)
-start_point: Optional[np.ndarray] = None             # координаты точки начала движения (пкс)
-click_point: np.ndarray | None = None                # координаты целевой точки (пкс)
-last_click_point: np.ndarray | None = None           # предыдущая целевая точка (пкс)
+motion_started: bool = False                          # флаг активности движения
+global_path: list = []                                # запланированный глобальный путь (список точек) (пкс)
+trajectory: list[np.ndarray] = []                     # фактическая траектория движения (список точек) (пкс)
+last_completed_path: Optional[dict] = None            # последний завершённый маршрут (список точек) (пкс)
+start_point: Optional[np.ndarray] = None              # координаты точки начала движения (пкс)
+click_point: np.ndarray | None = None                 # координаты целевой точки (пкс)
+last_click_point: np.ndarray | None = None            # предыдущая целевая точка (пкс)
 
-center_x: int = 0                                    # X-координата центра робота (пкс)
-center_y: int = 0                                    # Y-координата центра робота (пкс)
-dx: float = 0.0                                      # разность X между двумя углами маркера (пкс)
-dy: float = 0.0                                      # разность Y между двумя углами маркера (пкс)
-angle: float = 0.0                                   # угол ориентации робота
+center_x: int = 0                                     # X-координата центра робота (пкс)
+center_y: int = 0                                     # Y-координата центра робота (пкс)
+dx: float = 0.0                                       # разность X между двумя углами маркера (пкс)
+dy: float = 0.0                                       # разность Y между двумя углами маркера (пкс)
+angle: float = 0.0                                    # угол ориентации робота
 
 # Автоматический режим
 auto_mode_enable: bool = bool(config['auto_mode']['enable'])
@@ -52,7 +52,7 @@ auto_algorithms = ["astar", "dijkstra", "greedy", "bdastar"]
 auto_phase: str = 'to_start'
 auto_algo_idx: int = 0
 auto_last_path: list = []
-auto_trajectories: list = []                         # список маршрутов для автоматического режима
+auto_trajectories: list = []
 
 # Параметры с файла "parameters.yaml"
 robot_status: bool = config['socket_params']['enable']
@@ -62,7 +62,9 @@ h: float = config['camera']['h']
 offset_x: float = config['camera']['offset_x']
 offset_y: float = config['camera']['offset_y']
 wall_width: int = config['camera']['wall_width']
-extra_offset_px: int = config['camera']['add_zone']
+extra_offset_red: int = config['camera']['add_zone_red']
+extra_offset_green: int = config['camera']['add_zone_green']
+extra_offset_blue: int = config['camera']['add_zone_blue']
 scale: float = config['camera']['scale_factor']
 scale_algorithm: float = config['camera']['scale_factor_mask']
 calibration_display_scale: float = config['camera']['calibration_display_scale']
@@ -284,20 +286,55 @@ def main():
             # Работа с масками (в HSV)
             hsv = cv2.cvtColor(working_area, cv2.COLOR_BGR2HSV)
 
-            # Создание бинарной маски и применение эрозии+дилатации
-            mask = cv2.inRange(hsv,
-                               np.array([0, 100, 135], dtype=np.uint8),
-                               np.array([179, 255, 255], dtype=np.uint8))
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_denoise)
+            # Создание
+            mask_red_1 = cv2.inRange(hsv,
+                                   np.array([0, 100, 135], dtype=np.uint8),
+                                   np.array([5, 255, 255], dtype=np.uint8))
+
+            mask_red_2 = cv2.inRange(hsv,
+                                   np.array([160, 100, 135], dtype=np.uint8),
+                                   np.array([200, 255, 255], dtype=np.uint8))
+
+            mask_red = cv2.bitwise_or(mask_red_1, mask_red_2)
+
+            mask_green = cv2.inRange(hsv,
+                                     np.array([40, 100, 135], dtype=np.uint8),
+                                     np.array([100, 255, 255], dtype=np.uint8))
+
+            mask_blue = cv2.inRange(hsv,
+                                    np.array([110, 100, 135], dtype=np.uint8),
+                                    np.array([160, 255, 255], dtype=np.uint8))
+
+            mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, kernel_denoise)
+            mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_OPEN, kernel_denoise)
+            mask_green = cv2.morphologyEx(mask_green, cv2.MORPH_OPEN, kernel_denoise)
 
             # Проекция маски (для учёта высоты камеры)
             if parallax:
-                mask = project_mask(mask,
-                                    H=H,
-                                    h=h,
-                                    center=trans_center)
+                mask_red = project_mask(mask_red,
+                                        H=H,
+                                        h=h,
+                                        center=trans_center)
+
+                mask_blue = project_mask(mask_blue,
+                                         H=H,
+                                         h=h,
+                                         center=trans_center)
+
+                mask_green = project_mask(mask_green,
+                                          H=H,
+                                          h=h,
+                                          center=trans_center)
+
+            mask_2 = cv2.bitwise_or(mask_red, mask_blue)
+
+            mask = cv2.bitwise_or(mask_2, mask_green)
 
             raw_obstacle_mask = mask.copy()
+
+            mask_copy_red = mask_red.copy()
+            mask_copy_green = mask_green.copy()
+            mask_copy_blue = mask_blue.copy()
 
             # Границы зоны езды
             mask[:wall_width, :] = 255
@@ -315,20 +352,54 @@ def main():
             if ids is not None and robot_radius_px > 0:
                 cv2.circle(mask, (center_y, center_x), robot_radius_px, 0, -1)
 
-            # Очистка масок внутри зоны робота
             if robot_radius_px > 0:
-                small_w = int(raw_obstacle_mask.shape[1] * scale)
-                small_h = int(raw_obstacle_mask.shape[0] * scale)
-                small_raw = cv2.resize(raw_obstacle_mask, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
+
+                small_w_r = int(mask_copy_red.shape[1] * scale)
+                small_h_r = int(mask_copy_red.shape[0] * scale)
+
+                small_w_g = int(mask_copy_green.shape[1] * scale)
+                small_h_g = int(mask_copy_green.shape[0] * scale)
+
+                small_w_b = int(mask_copy_blue.shape[1] * scale)
+                small_h_b = int(mask_copy_blue.shape[0] * scale)
+
+                small_raw_r = cv2.resize(mask_copy_red, (small_w_r, small_h_r), interpolation=cv2.INTER_NEAREST)
+                small_raw_g = cv2.resize(mask_copy_green, (small_w_g, small_h_g), interpolation=cv2.INTER_NEAREST)
+                small_raw_b = cv2.resize(mask_copy_blue, (small_w_b, small_h_b), interpolation=cv2.INTER_NEAREST)
 
                 # Расширение маски препятствия на r_small
-                r_small = max(1, int(robot_radius_px * scale + extra_offset_px))
-                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
-                                                   (2 * r_small + 1, 2 * r_small + 1))
-                small_dilated = cv2.dilate(small_raw, kernel)
-                dilated_only_obstacles = cv2.resize(small_dilated,
-                                                    (raw_obstacle_mask.shape[1], raw_obstacle_mask.shape[0]),
-                                                    interpolation=cv2.INTER_NEAREST)
+                r_small_red = max(1, int(robot_radius_px * scale + extra_offset_red))
+                r_small_green = max(1, int(robot_radius_px * scale + extra_offset_green))
+                r_small_blue = max(1, int(robot_radius_px * scale + extra_offset_blue))
+
+                kernel_red = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                       (2 * r_small_red + 1, 2 * r_small_red + 1))
+
+                kernel_green = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                         (2 * r_small_green + 1, 2 * r_small_green + 1))
+
+                kernel_blue = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,
+                                                        (2 * r_small_blue + 1, 2 * r_small_blue + 1))
+
+                small_dilated_r = cv2.dilate(small_raw_r, kernel_red)
+                small_dilated_g = cv2.dilate(small_raw_g, kernel_green)
+                small_dilated_b = cv2.dilate(small_raw_b, kernel_blue)
+
+                dilated_only_obstacles_r = cv2.resize(small_dilated_r,
+                                                      (mask_copy_red.shape[1], mask_copy_red.shape[0]),
+                                                      interpolation=cv2.INTER_NEAREST)
+
+                dilated_only_obstacles_g = cv2.resize(small_dilated_g,
+                                                      (mask_copy_green.shape[1], mask_copy_green.shape[0]),
+                                                      interpolation=cv2.INTER_NEAREST)
+
+                dilated_only_obstacles_b = cv2.resize(small_dilated_b,
+                                                      (mask_copy_blue.shape[1], mask_copy_blue.shape[0]),
+                                                      interpolation=cv2.INTER_NEAREST)
+
+                dilated_only_obstacles_2 = cv2.bitwise_or(dilated_only_obstacles_r, dilated_only_obstacles_g)
+                dilated_only_obstacles = cv2.bitwise_or(dilated_only_obstacles_2, dilated_only_obstacles_b)
+
             else:
                 dilated_only_obstacles = raw_obstacle_mask.copy()
 

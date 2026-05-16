@@ -571,42 +571,42 @@ if auto_mode_enable:
     <tr>
       <td align="center">A*</td>
       <td align="center" style="color:black; font-weight:bold;">Чёрный</td>
-      <td align="center"><strong>37,57</strong></td>
-      <td align="center"><strong>3334,66</strong></td>
-      <td align="center"><strong>3316,26</strong></td>
-      <td align="center">126,84</td>
-      <td align="center">0,9998</td>
-      <td align="center">273</td>
+      <td align="center"><strong>34,694</strong></td>
+      <td align="center"><strong>3027,31</strong></td>
+      <td align="center"><strong>3025,48</strong></td>
+      <td align="center"><strong>73,779</strong></td>
+      <td align="center"><strong>0,9999</strong></td>
+      <td align="center"><strong>145</strong></td>
     </tr>
     <tr>
       <td align="center">Дейкстра</td>
       <td align="center" style="color:blue; font-weight:bold;">Синий</td>
-      <td align="center">39,59</td>
-      <td align="center">3501,22</td>
-      <td align="center">3445,25</td>
-      <td align="center">60,31</td>
-      <td align="center"><strong>0,9999</strong></td>
-      <td align="center">285</td>
+      <td align="center">34,766</td>
+      <td align="center">3063,53</td>
+      <td align="center">3076,08</td>
+      <td align="center">117,497</td>
+      <td align="center">0.9998</td>
+      <td align="center">147</td>
     </tr>
     <tr>
       <td align="center">Жадный</td>
       <td align="center" style="color:darkgreen; font-weight:bold;">Тёмно-зелёный</td>
-      <td align="center">43,28</td>
-      <td align="center">4085,45</td>
-      <td align="center">3823,18</td>
-      <td align="center"><strong>41,87</strong></td>
-      <td align="center"><strong>0,9999</strong></td>
-      <td align="center">315</td>
+      <td align="center">38,942</td>
+      <td align="center">3863,45</td>
+      <td align="center">3604,66</td>
+      <td align="center">117,24</td>
+      <td align="center">0,9998</td>
+      <td align="center">175</td>
     </tr>
     <tr>
       <td align="center">Двунаправленный A*</td>
       <td align="center" style="color:fuchsia; font-weight:bold;">Фиолетовый</td>
-      <td align="center">40,38</td>
-      <td align="center">3542,11</td>
-      <td align="center">3478,77</td>
-      <td align="center">56,06</td>
-      <td align="center"><strong>0,9999</strong></td>
-      <td align="center"><strong>270</strong></td>
+      <td align="center">34,878</td>
+      <td align="center">3033,53</td>
+      <td align="center">3088,18</td>
+      <td align="center">126,641</td>
+      <td align="center">0,9998</td>
+      <td align="center"><strong>145</strong></td>
     </tr>
   </tbody>
 </table>
