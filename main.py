@@ -12,47 +12,54 @@ from Camera import (is_convex_quad, order_points_clockwise,
 from Navigation import (compute_velocity, astar,
                         get_lookahead_point, find_nearest_free,
                         dijkstra, greedy_best_first,
-                        bidirectional_astar, compute_metrics)
+                        bidirectional_astar, compute_metrics,
+                        generate_spline_path, subsample_path,
+                        plot_trajectory_comparison)
 from Robotino import connect_to_robotino, send_velocity
 
 with open('parameters.yaml') as config_file:
     config = yaml.safe_load(config_file)
 print(config)
 
-output_size: Optional[Tuple[int, int]] = None         # размер рабочей области [ширина, высота] (пкс)
-start_time_task: float | None = None                  # время старта текущего маршрута (сек)
+robot_position: Optional[np.ndarray] = None  # позиция робота (пкс)
+output_size: Optional[Tuple[int, int]] = None  # размер рабочей области [ширина, высота] (пкс)
+start_time_task: float | None = None  # время старта текущего маршрута (сек)
 
 # Состояние интерфейса
-mode: str = 'calibrate'                               # текущий режим интерфейса: 'calibrate' и 'working'
-calib_points: list = []                               # координаты четырёх углов рабочей области
-perspective_matrix: Optional[np.ndarray] = None       # матрица перспективного преобразования
-trans_center: Optional[Tuple[float, float]] = None    # проекция оптического центра камеры на рабочую область
-frame_shape: Optional[Tuple[int, int]] = None         # размеры исходного кадра [ширина, высота]
-sharpening_kernel: Optional[np.float32] = None        # ядро для повышения резкости
+mode: str = 'calibrate'  # текущий режим интерфейса: 'calibrate' и 'working'
+calib_points: list = []  # координаты четырёх углов рабочей области
+perspective_matrix: Optional[np.ndarray] = None  # матрица перспективного преобразования
+trans_center: Optional[Tuple[float, float]] = None  # проекция оптического центра камеры на рабочую область
+frame_shape: Optional[Tuple[int, int]] = None  # размеры исходного кадра [ширина, высота]
+sharpening_kernel: Optional[np.float32] = None  # ядро для повышения резкости
 
-motion_started: bool = False                          # флаг активности движения
-global_path: list = []                                # запланированный глобальный путь (список точек) (пкс)
-trajectory: list[np.ndarray] = []                     # фактическая траектория движения (список точек) (пкс)
-last_completed_path: Optional[dict] = None            # последний завершённый маршрут (список точек) (пкс)
-start_point: Optional[np.ndarray] = None              # координаты точки начала движения (пкс)
-click_point: np.ndarray | None = None                 # координаты целевой точки (пкс)
-last_click_point: np.ndarray | None = None            # предыдущая целевая точка (пкс)
+motion_started: bool = False  # флаг активности движения
+global_path: list = []  # запланированный глобальный путь (список точек) (пкс)
+trajectory: list[np.ndarray] = []  # фактическая траектория движения (список точек) (пкс)
+last_completed_path: Optional[dict] = None  # последний завершённый маршрут (список точек) (пкс)
+start_point: Optional[np.ndarray] = None  # координаты точки начала движения (пкс)
+click_point: np.ndarray | None = None  # координаты целевой точки (пкс)
+last_click_point: np.ndarray | None = None  # предыдущая целевая точка (пкс)
+auto_pause_until: float = 0.0  # время, до которого робот стоит в паузе (сек)
 
-center_x: int = 0                                     # X-координата центра робота (пкс)
-center_y: int = 0                                     # Y-координата центра робота (пкс)
-dx: float = 0.0                                       # разность X между двумя углами маркера (пкс)
-dy: float = 0.0                                       # разность Y между двумя углами маркера (пкс)
-angle: float = 0.0                                    # угол ориентации робота
+center_x: int = 0  # X-координата центра робота (пкс)
+center_y: int = 0  # Y-координата центра робота (пкс)
+dx: float = 0.0  # разность X между двумя углами маркера (пкс)
+dy: float = 0.0  # разность Y между двумя углами маркера (пкс)
+angle: float = 0.0  # угол ориентации робота
 
 # Автоматический режим
-auto_mode_enable: bool = bool(config['auto_mode']['enable'])
-auto_start: np.ndarray = np.array([config['auto_mode']['start_x'], config['auto_mode']['start_y']], dtype=np.float32)
-auto_end: np.ndarray = np.array([config['auto_mode']['end_x'], config['auto_mode']['end_y']], dtype=np.float32)
-auto_algorithms = ["astar", "dijkstra", "greedy", "bdastar"]
+auto_algorithms: list = ["astar", "dijkstra", "greedy", "bdastar"]
 auto_phase: str = 'to_start'
 auto_algo_idx: int = 0
 auto_last_path: list = []
 auto_trajectories: list = []
+
+# Режим сплайнов
+raw_algorithm_path: list = []
+spline_anchor_points: list = []
+thinned: list = []
+spline_active_for_goal: bool = False
 
 # Параметры с файла "parameters.yaml"
 robot_status: bool = config['socket_params']['enable']
@@ -71,6 +78,7 @@ calibration_display_scale: float = config['camera']['calibration_display_scale']
 working_display_scale: int = config['camera']['working_display_scale']
 sharpening: bool = config['camera']['sharpening']
 camera_status: bool = config['camera']['online']
+video_path: bool = config['camera']['video_path']
 parallax: bool = config['camera']['parallax']
 video_stream: int = config['camera']['video_stream']
 
@@ -82,6 +90,16 @@ acceptable_error: float = config['map_params']['acceptable_error']
 
 robot_radius: float = config['robot']['radius']
 v_max: float = config['robot']['max_speed']
+
+# Автоматический режим
+auto_mode_enable: bool = bool(config['auto_mode']['enable'])
+auto_start: np.ndarray = np.array([config['auto_mode']['start_x'], config['auto_mode']['start_y']], dtype=np.float32)
+auto_end: np.ndarray = np.array([config['auto_mode']['end_x'], config['auto_mode']['end_y']], dtype=np.float32)
+
+# Параметры сплайнового движения
+spline_enable: bool = bool(config['spline']['enable'])
+spline_step_mm: float = config['spline']['spline_step_mm']
+subsample_step: int = config['spline']['subsample_step']
 
 
 def mouse_callback(
@@ -119,7 +137,7 @@ def mouse_callback(
     global mode, calib_points, perspective_matrix, trans_center
     global click_point, motion_started, start_time_task, trajectory
     global output_size, start_point, last_completed_path
-    global offset_x, offset_y
+    global offset_x, offset_y, spline_active_for_goal
 
     if auto_mode_enable and mode == 'working':
         return
@@ -183,6 +201,9 @@ def mouse_callback(
             last_completed_path = None
             motion_started = True
             start_time_task = time.time()
+            spline_active_for_goal = False
+            raw_algorithm_path.clear()
+            spline_anchor_points.clear()
             trajectory.clear()
             print(f"Целевая точка: {click_point}")
 
@@ -190,11 +211,13 @@ def mouse_callback(
 def main():
     # Создание глобальных переменных
     global mode, calib_points, trans_center, center_y, center_x, dx, dy, angle, sharpening_kernel
-    global robot_position, auto_pause_until, auto_trajectories, auto_phase, auto_algo_idx, auto_last_path
+    global robot_position, auto_pause_until, auto_trajectories, auto_phase, auto_algo_idx
     global output_size, click_point, motion_started, start_time_task, trajectory, start_point
     global auto_mode_enable, auto_phase, auto_algo_idx, auto_last_path, algorithm, click_point
-    global motion_started, start_time_task, trajectory, start_point
+    global motion_started, start_time_task, trajectory, start_point, raw_algorithm_path
     global frame_shape, global_path, last_click_point, last_completed_path, video_stream
+    global spline_anchor_points, spline_enable, spline_step_mm, spline_active_for_goal
+    global subsample_step, video_path, thinned, auto_last_path
 
     # Подключение к Robotino
     sock = None
@@ -224,7 +247,7 @@ def main():
         # "video_photo_space\vid.mp4"
         # "video_photo_space\WIN_20260508_21_24_57_Pro.mp4"
         cap = cv2.VideoCapture(
-            r"video_photo_space\vid.mp4")
+            video_path)
     if not cap.isOpened():
         raise RuntimeError("Ошибка воспроизведения")
 
@@ -288,12 +311,12 @@ def main():
 
             # Создание
             mask_red_1 = cv2.inRange(hsv,
-                                   np.array([0, 100, 135], dtype=np.uint8),
-                                   np.array([5, 255, 255], dtype=np.uint8))
+                                     np.array([0, 100, 135], dtype=np.uint8),
+                                     np.array([5, 255, 255], dtype=np.uint8))
 
             mask_red_2 = cv2.inRange(hsv,
-                                   np.array([160, 100, 135], dtype=np.uint8),
-                                   np.array([200, 255, 255], dtype=np.uint8))
+                                     np.array([160, 100, 135], dtype=np.uint8),
+                                     np.array([200, 255, 255], dtype=np.uint8))
 
             mask_red = cv2.bitwise_or(mask_red_1, mask_red_2)
 
@@ -557,9 +580,13 @@ def main():
 
             # Планирование маршрута с учётом препятствий
             if ids is not None and click_point is not None:
-                if dynamic_update or (last_click_point is None or
-                                      not np.array_equal(click_point, last_click_point) or not global_path):
-                    last_click_point = click_point.copy()
+                # Если сплайн активен и цель та же – не пересчитываем маршрут
+                if not (spline_enable and spline_active_for_goal and
+                        last_click_point is not None and
+                        np.array_equal(click_point, last_click_point)):
+                    if dynamic_update or (last_click_point is None or
+                                          not np.array_equal(click_point, last_click_point) or not global_path):
+                        last_click_point = click_point.copy()
 
                     small_mask = cv2.resize(np.transpose(mask_for_algorithm),
                                             (int(mask_for_algorithm.shape[1] * scale_algorithm),
@@ -606,6 +633,23 @@ def main():
                     else:
                         global_path = []
 
+            # Обработка сплайна
+            if spline_enable and global_path and not spline_active_for_goal:
+                # Сохраняем исходный путь алгоритма
+                raw_algorithm_path = global_path.copy()
+
+                # Безопасное прореживание
+                if subsample_step > 1:
+                    thinned = subsample_path(global_path, subsample_step)
+                else:
+                    thinned = global_path
+
+                step_px = spline_step_mm * pixel_per_mm
+                global_path = generate_spline_path(thinned, step_px=step_px)
+
+                # Помечаем, что сплайн готов для этой цели
+                spline_active_for_goal = True
+
             # Разрешаем движение, если есть путь
             if ids is not None and click_point is not None:
                 if global_path:
@@ -650,6 +694,7 @@ def main():
                 dist_to_goal = np.linalg.norm(robot_position - click_point)
                 if dist_to_goal < acceptable_error_px and auto_mode_enable == 0:
                     motion_started = False
+                    spline_active_for_goal = False
 
                     # Сохраняем завершённый маршрут для отображения
                     if global_path and trajectory:
@@ -663,6 +708,9 @@ def main():
                     # Сбор метрик
                     if not dynamic_update:
                         if start_time_task is not None and trajectory and global_path:
+                            if spline_enable and raw_algorithm_path and global_path:
+                                plot_trajectory_comparison(raw_algorithm_path, global_path, show=True)
+
                             traj_copy = trajectory.copy()
                             path_copy = global_path.copy()
                             metrics = compute_metrics(
@@ -761,13 +809,6 @@ def main():
                                 (text_x, text_y + eh + 60),
                                 cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 6)
 
-                # Глобальный путь чёрными стрелками
-                if global_path and len(global_path) > 1:
-                    for i in range(len(global_path) - 1):
-                        pt1 = (int(global_path[i][1]), int(global_path[i][0]))
-                        pt2 = (int(global_path[i + 1][1]), int(global_path[i + 1][0]))
-                        cv2.arrowedLine(working_area, pt1, pt2, (0, 0, 0), 3, tipLength=0.15)
-
                 # Вектор притяжения (красная стрелка)
                 cv2.arrowedLine(working_area,
                                 tuple(robot_position[::-1].astype(int)),
@@ -782,6 +823,26 @@ def main():
                         pt2 = tuple(trajectory[i][::-1].astype(int))
                         cv2.line(working_area, pt1, pt2, (255, 38, 0), 5)
 
+                if spline_enable:
+                    # Исходный путь алгоритма (чёрные кружки)
+                    if raw_algorithm_path and len(raw_algorithm_path) > 1:
+                        for i in range(len(raw_algorithm_path) - 1):
+                            pt1 = (int(raw_algorithm_path[i][1]), int(raw_algorithm_path[i][0]))
+                            pt2 = (int(raw_algorithm_path[i + 1][1]), int(raw_algorithm_path[i + 1][0]))
+                            cv2.arrowedLine(working_area, pt1, pt2, (64, 64, 64), 8)
+
+                    # Опорные точки после упрощения
+                    if thinned:
+                        for pt in thinned:
+                            cv2.circle(working_area, (int(pt[1]), int(pt[0])), 15, (0, 0, 255), -1)
+
+                # Глобальный путь чёрными стрелками
+                if global_path and len(global_path) > 1:
+                    for i in range(len(global_path) - 1):
+                        pt1 = (int(global_path[i][1]), int(global_path[i][0]))
+                        pt2 = (int(global_path[i + 1][1]), int(global_path[i + 1][0]))
+                        cv2.arrowedLine(working_area, pt1, pt2, (0, 0, 0), 8)
+
                 # Отрисовка маршрута после проезда
                 if last_completed_path is not None:
                     # Плановый путь
@@ -791,7 +852,7 @@ def main():
                             pt1 = (int(planned[i][1]), int(planned[i][0]))
                             pt2 = (int(planned[i + 1][1]), int(planned[i + 1][0]))
                             cv2.arrowedLine(working_area, pt1, pt2,
-                                            (128, 128, 128), 2, tipLength=0.1)
+                                            (128, 128, 128), 2)
 
                     # Фактическая траектория
                     actual = last_completed_path['actual']

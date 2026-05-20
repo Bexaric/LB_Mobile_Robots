@@ -2,7 +2,9 @@ import math
 import time
 import numpy as np
 import heapq
+import matplotlib.pyplot as plt
 from typing import List, Dict, Optional, Tuple
+from scipy.interpolate import make_interp_spline
 
 
 def compute_velocity(current_position,
@@ -410,6 +412,163 @@ def get_lookahead_point(
             return lookahead_point.astype(np.float32)
         accumulated += seg_len
     return path_arr[-1].astype(np.float32)
+
+
+def subsample_path(
+    points: List[Tuple[float, float]],
+    step: int
+) -> List[Tuple[float, float]]:
+    """
+    Прореживает путь, оставляя каждую step-ю точку. Без проверки коллизий.
+    Входы:
+        points: исходный путь (x, y)
+        step: шаг прореживания (например, 2 — взять каждую вторую точку)
+    Выходы:
+        прореженный список точек
+    """
+    if step <= 1 or len(points) <= 2:
+        return points
+
+    result = [points[0]]
+    for i in range(1, len(points) - 1, step):
+        result.append(points[i])
+    result.append(points[-1])
+    return result
+
+
+def generate_spline_path(
+    anchor_points: List[Tuple[float, float]],
+    step_px: float = 30.0,
+    max_samples: int = 1000
+) -> List[Tuple[float, float]]:
+    """
+    Строит сглаженный кубический сплайн через опорные точки и возвращает плотный путь
+    с точками, отстоящими друг от друга примерно на step_px пикселей.
+    """
+    if not anchor_points:
+        return []
+
+    # Удаляем последовательные дубликаты
+    unique_points = [anchor_points[0]]
+    for pt in anchor_points[1:]:
+        if np.linalg.norm(np.array(pt) - np.array(unique_points[-1])) > 1e-6:
+            unique_points.append(pt)
+
+    # Если после удаления осталось меньше 2 точек, возвращаем исходную точку
+    if len(unique_points) < 2:
+        return anchor_points
+
+    # Для 2–3 точек строим линейную интерполяцию
+    if len(unique_points) < 4:
+        if len(unique_points) == 2:
+            p1, p2 = np.array(unique_points[0]), np.array(unique_points[1])
+            dist = np.linalg.norm(p2 - p1)
+            n = max(2, int(dist / step_px) + 1)
+            t_vals = np.linspace(0, 1, n)
+            x_vals = p1[0] + t_vals * (p2[0] - p1[0])
+            y_vals = p1[1] + t_vals * (p2[1] - p1[1])
+            return [(float(x_vals[i]), float(y_vals[i])) for i in range(n)]
+        else:
+            # 3 точки – можно сделать сплайн 2-й степени или линейную интерполяцию
+            result = []
+            for i in range(len(unique_points) - 1):
+                p1 = np.array(unique_points[i])
+                p2 = np.array(unique_points[i+1])
+                dist = np.linalg.norm(p2 - p1)
+                n = max(2, int(dist / step_px) + 1)
+                t_vals = np.linspace(0, 1, n)
+
+                for j in range(n if i == len(unique_points)-2 else n-1):
+                    x = p1[0] + t_vals[j] * (p2[0] - p1[0])
+                    y = p1[1] + t_vals[j] * (p2[1] - p1[1])
+                    result.append((float(x), float(y)))
+            return result
+
+    pts = np.array(unique_points, dtype=float)
+    # Параметризация по длине хорд
+    deltas = np.diff(pts, axis=0)
+    distances = np.sqrt(np.sum(deltas ** 2, axis=1))
+    u = np.zeros(len(pts))
+    u[1:] = np.cumsum(distances)
+    total_length = u[-1]
+    if total_length > 0:
+        u = u / total_length
+
+    # Строим кубический сплайн
+    spline = make_interp_spline(u, pts, k=3)
+
+    # Оцениваем длину сплайна через большое количество точек
+    fine_u = np.linspace(0, 1, max_samples)
+    fine_pts = spline(fine_u)
+    diffs = np.diff(fine_pts, axis=0)
+    cumlen = np.zeros(max_samples)
+    cumlen[1:] = np.cumsum(np.sqrt(np.sum(diffs ** 2, axis=1)))
+    total_spline_length = cumlen[-1]
+
+    # Определяем число точек для выходной дискретизации
+    n_out = max(2, int(total_spline_length / step_px) + 1)
+
+    # Равномерно распределённые длины
+    target_lengths = np.linspace(0, total_spline_length, n_out)
+
+    # Находим параметры u_out через интерполяцию длины
+    u_out = np.interp(target_lengths, cumlen, fine_u)
+
+    # Вычисляем точки сплайна в u_out
+    out_pts = spline(u_out)
+    return [(float(x), float(y)) for x, y in out_pts]
+
+
+def plot_trajectory_comparison(
+    raw_path: List[Tuple[float, float]],
+    spline_path: List[Tuple[float, float]],
+    save_path: str = None,
+    show: bool = True
+) -> None:
+    """
+    Строит два графика: X и Y от индекса точки для исходной траектории и сплайна.
+
+    Входы:
+        raw_path: список точек (x, y) исходного пути (A*).
+        spline_path: список точек (x, y) сплайнового пути.
+        save_path: если задан, сохраняет график в файл (опционально).
+        show: если True, показывает график на экране.
+    """
+    if not raw_path or not spline_path:
+        print("Нет данных для построения графиков")
+        return
+
+    raw = np.array(raw_path)
+    spline = np.array(spline_path)
+
+    t_raw = np.arange(len(raw))
+    t_spline = np.linspace(0, len(raw) - 1, len(spline))
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
+
+    ax1.plot(t_raw, raw[:, 0], 'ko-', markersize=3, linewidth=1, label='A*')
+    ax1.plot(t_spline, spline[:, 0], 'r.-', markersize=2, linewidth=1, label='A* + сплайн')
+    ax1.set_ylabel('X, мм')
+    ax1.legend()
+    ax1.grid(True)
+
+    ax2.plot(t_raw, raw[:, 1], 'ko-', markersize=3, linewidth=1, label='A*')
+    ax2.plot(t_spline, spline[:, 1], 'r.-', markersize=2, linewidth=1, label='A* + сплайн')
+    ax2.set_xlabel('Индекс точки')
+    ax2.set_ylabel('Y, мм')
+    ax2.legend()
+    ax2.grid(True)
+
+    fig.suptitle('Сравнение траекторий')
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=150)
+        print(f"График сохранён в {save_path}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
 
 
 def compute_metrics(
